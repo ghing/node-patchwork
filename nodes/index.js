@@ -1,14 +1,14 @@
-var monk = require('monk'),
+var EventEmitter = require('events').EventEmitter,
+    monk = require('monk'),
     OAuth = require('oauth').OAuth,
     querystring = require('querystring'),
     util = require('util');
 
-var db;
-var hostname;
-var oAuthTokens;
-var getRequestTokenUrl = "https://www.google.com/accounts/OAuthGetRequestToken";
 var drivers = {};
 var registry = {};
+var getRequestTokenUrl = "https://www.google.com/accounts/OAuthGetRequestToken";
+var db;
+var oAuthTokens;
 
 function saveOAuthToken(id, token, tokenSecret) {
   oAuthTokens.insert({
@@ -22,14 +22,50 @@ function getOAuthToken(id, cb) {
   oAuthTokens.findOne({ id: id }).on('success', cb);
 }
 
-function Output(id, opts) {
+function Node(id, opts) {
+  Node.super_.call(this);
   this.id = id;
   this.options = opts;
 }
+util.inherits(Node, EventEmitter);
 
-Output.prototype.addInput = function(input) {
+Node.prototype.addInput = function(input) {
   input.on('message', this.handleMessage.bind(this));  
 };
+
+function TwilioSmsInput(id, opts) {
+  TwilioSmsInput.super_.call(this, id, opts);
+}
+util.inherits(TwilioSmsInput, Node);
+
+TwilioSmsInput.driverName = "Twilio SMS";
+TwilioSmsInput.driverId = "twilio-sms";
+
+TwilioSmsInput.prototype.contributeRoutes = function(app) {
+  var input = this;
+
+  // Handler for the SMS Request URL configured for a Twilio phone number
+  // POST parameters are documented at
+  // http://www.twilio.com/docs/api/twiml/sms/twilio_request
+  app.post('/' + this.id + '/twilio-sms-request', function(req, resp) {
+    var date = new Date();
+    var data = {
+      smssid: req.body.SmsSid,
+      from: req.body.From, 
+      body: req.body.Body,
+      date: date.toISOString() 
+    };
+    console.dir(data);
+    input.emit('message', data);
+
+    // If we wanted to send an SMS response, we could, but for now,
+    // just send back an empty response
+    resp.send('');
+  });
+};
+
+drivers[TwilioSmsInput.driverId] = TwilioSmsInput;
+
 
 var getFeedUrl = function(baseUrl, params) {
   var visibility = "private";
@@ -68,7 +104,7 @@ var postFeed = function(baseUrl, params, body, oa, token, cb) {
 function GoogleSpreadsheetOutput(id, opts) {
   GoogleSpreadsheetOutput.super_.call(this, id, opts);
 }
-util.inherits(GoogleSpreadsheetOutput, Output);
+util.inherits(GoogleSpreadsheetOutput, Node);
 
 GoogleSpreadsheetOutput.driverName = "Google Spreadsheet";
 GoogleSpreadsheetOutput.driverId = "google-spreadsheet";
@@ -183,23 +219,41 @@ function createOutput(id, driverId, opts) {
 
 function configure(conf) {
   db = monk(conf.get('database'));
-  hostname = conf.get('hostname');
   oAuthTokens = db.get('oauthtokens');
 }
 
 function create(id, driverId, opts) {
-  var outputClass = drivers[driverId];
-  var output = new outputClass(id, opts);
-  registry[id] = output; 
-  return output;
+  var cls = drivers[driverId];
+  var node = new cls(id, opts);
+  registry[id] = node; 
+  return node;
 }
 
 function get(id) {
   return registry[id];
 }
 
+function initialize(conf, app) {
+  var nodes = conf.get('nodes');
+  var routes = conf.get('routes');
+
+  Object.keys(nodes).forEach(function(id) {
+    var node = create(id, nodes[id].driver, nodes[id].options);
+    node.contributeRoutes(app);
+  });
+
+  Object.keys(routes).forEach(function(id) {
+    routes[id].forEach(function(route) {
+      var input = get(route.input); 
+      var output = get(route.output);
+      output.addInput(input);
+    });
+  });
+}
+
 module.exports = {
   configure: configure,
   create: create,
-  get: get
+  get: get,
+  initialize: initialize
 };
