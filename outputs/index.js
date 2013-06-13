@@ -54,7 +54,6 @@ var getFeed = function(baseUrl, params, oa, token, cb) {
 
 var postFeed = function(baseUrl, params, body, oa, token, cb) {
   var url = getFeedUrl(baseUrl, params);
-  console.dir(url);
   oa.post(
     url,
     token.token,
@@ -62,8 +61,6 @@ var postFeed = function(baseUrl, params, body, oa, token, cb) {
     body,
    'application/atom+xml',
     function (error, data, response) {
-      console.log(error);
-      console.log(data);
       cb(data);
   });
 };
