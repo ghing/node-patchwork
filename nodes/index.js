@@ -60,7 +60,22 @@ TwilioSmsInput.prototype.contributeRoutes = function(app) {
 
     // If we wanted to send an SMS response, we could, but for now,
     // just send back an empty response
-    resp.send('');
+    if (input.options.response) {
+      // Send the configured message as an SMS response
+      //
+      // For now, just send back the reply messaage as text. If we wanted
+      // to get fancy, we could support TwiML. See
+      // http://www.twilio.com/docs/api/twiml/sms/your_response
+      //
+      resp.setHeader('Content-Length', input.options.response.length);
+      resp.setHeader('Content-Type', 'text/plain');
+      resp.end(input.options.response);
+    }
+    else {
+      // No response configured, just respond with an empty string
+      // which means no SMS reply will be sent to the user
+      resp.send('');
+    }
   });
 };
 
